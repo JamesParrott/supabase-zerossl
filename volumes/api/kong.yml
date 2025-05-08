@@ -34,7 +34,7 @@ plugins:
 - name: acme
   config:
     account_email: $ACME_EMAIL
-    api_uri: https://acme-v02.api.letsencrypt.org/directory
+    api_uri: https://acme.zerossl.com/v2/DV90
     tos_accepted: true
     domains:
       - $ACME_DOMAIN
