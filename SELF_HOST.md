@@ -23,6 +23,7 @@ git clone --depth=1 --branch=Studio_on_subpath https://github.com/JamesParrott/s
 Copy this repo's patches into the supabase repo
 ```
 cp -rf supabase-zerossl/* supabase
+cp -rf supabase-zerossl/.env.example supabase/.env.example
 ```
 
 
@@ -31,7 +32,7 @@ cp -rf supabase-zerossl/* supabase
 ```
 
 # Switch to your project directory
-cd supabase-project
+cd supabase
 
 # Pull the latest images
 docker compose pull
