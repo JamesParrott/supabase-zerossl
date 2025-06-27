@@ -8,8 +8,15 @@ name: supabase
 
 services:
   studio:
+    # container_name: supabase-studio
+    # image: supabase/studio:20240708-66e6e0d
     container_name: supabase-studio
-    image: supabase/studio:20240708-66e6e0d
+    build:
+      context: .
+      dockerfile: apps/studio/Dockerfile
+      args:
+        NEXT_PUBLIC_BASE_PATH: ${NEXT_PUBLIC_BASE_PATH:-/dashboard}
+        SITE_URL: ${SITE_URL:-https://example.com}
     restart: unless-stopped
     healthcheck:
       test:
@@ -17,7 +24,7 @@ services:
           "CMD",
           "node",
           "-e",
-          "require('http').get('http://localhost:3000/api/profile', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})"
+          "fetch('http://studio:3000${NEXT_PUBLIC_BASE_PATH}/api/platform/profile').then((r) => {if (r.status !== 200) throw new Error(r.status)})"
         ]
       timeout: 5s
       interval: 5s
@@ -32,8 +39,10 @@ services:
       DEFAULT_ORGANIZATION_NAME: ${STUDIO_DEFAULT_ORGANIZATION}
       DEFAULT_PROJECT_NAME: ${STUDIO_DEFAULT_PROJECT}
 
+
+      NEXT_PUBLIC_BASE_PATH: ${NEXT_PUBLIC_BASE_PATH}
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}${NEXT_PUBLIC_BASE_PATH}
       SUPABASE_URL: http://kong:8000
-      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
       SUPABASE_ANON_KEY: ${ANON_KEY}
       SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
 
@@ -93,7 +102,7 @@ services:
 
   auth:
     container_name: supabase-auth
-    image: supabase/gotrue:v2.155.4
+    image: supabase/gotrue:v2.174.0
     depends_on:
       db:
         # Disable this if you are using an external Postgres database
@@ -167,7 +176,7 @@ services:
 
   rest:
     container_name: supabase-rest
-    image: postgrest/postgrest:v12.2.2
+    image: postgrest/postgrest:v12.2.12
     depends_on:
       db:
         # Disable this if you are using an external Postgres database
@@ -188,7 +197,7 @@ services:
   realtime:
     # This container name looks inconsistent but is correct because realtime constructs tenant id by parsing the subdomain
     container_name: realtime-dev.supabase-realtime
-    image: supabase/realtime:v2.28.32
+    image: supabase/realtime:v2.34.47
     depends_on:
       db:
         # Disable this if you are using an external Postgres database
@@ -234,7 +243,7 @@ services:
   # To use S3 backed storage: docker compose -f docker-compose.yml -f docker-compose.s3.yml up
   storage:
     container_name: supabase-storage
-    image: supabase/storage-api:v1.8.2
+    image: supabase/storage-api:v1.23.0
     depends_on:
       db:
         # Disable this if you are using an external Postgres database
@@ -293,7 +302,7 @@ services:
 
   meta:
     container_name: supabase-meta
-    image: supabase/postgres-meta:v0.83.2
+    image: supabase/postgres-meta:v0.89.3
     depends_on:
       db:
         # Disable this if you are using an external Postgres database
@@ -311,7 +320,7 @@ services:
 
   functions:
     container_name: supabase-edge-functions
-    image: supabase/edge-runtime:v1.55.0
+    image: supabase/edge-runtime:v1.67.4
     restart: unless-stopped
     depends_on:
       analytics:
@@ -333,7 +342,7 @@ services:
 
   analytics:
     container_name: supabase-analytics
-    image: supabase/logflare:1.7.10
+    image: supabase/logflare:1.14.2
     healthcheck:
       test: [ "CMD", "curl", "http://localhost:4000/health" ]
       timeout: 5s
@@ -376,7 +385,7 @@ services:
   # Comment out everything below this point if you are using an external Postgres database
   db:
     container_name: supabase-db
-    image: supabase/postgres:15.1.1.79
+    image: supabase/postgres:15.8.1.060
     healthcheck:
       test: pg_isready -U postgres -h localhost
       interval: 5s
@@ -443,6 +452,61 @@ services:
     environment:
       LOGFLARE_API_KEY: ${LOGFLARE_API_KEY}
     command: [ "--config", "etc/vector/vector.yml" ]
+
+
+  # Update the DATABASE_URL if you are using an external Postgres database
+  supavisor:
+    container_name: supabase-pooler
+    image: supabase/supavisor:2.5.1
+    restart: unless-stopped
+    ports:
+      - ${POSTGRES_PORT}:5432
+      - ${POOLER_PROXY_PORT_TRANSACTION}:6543
+    volumes:
+      - ./volumes/pooler/pooler.exs:/etc/pooler/pooler.exs:ro,z
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "curl",
+          "-sSfL",
+          "--head",
+          "-o",
+          "/dev/null",
+          "http://127.0.0.1:4000/api/health"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      db:
+        condition: service_healthy
+      analytics:
+        condition: service_healthy
+    environment:
+      PORT: 4000
+      POSTGRES_PORT: ${POSTGRES_PORT}
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      DATABASE_URL: ecto://supabase_admin:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/_supabase
+      CLUSTER_POSTGRES: true
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE}
+      VAULT_ENC_KEY: ${VAULT_ENC_KEY}
+      API_JWT_SECRET: ${JWT_SECRET}
+      METRICS_JWT_SECRET: ${JWT_SECRET}
+      REGION: local
+      ERL_AFLAGS: -proto_dist inet_tcp
+      POOLER_TENANT_ID: ${POOLER_TENANT_ID}
+      POOLER_DEFAULT_POOL_SIZE: ${POOLER_DEFAULT_POOL_SIZE}
+      POOLER_MAX_CLIENT_CONN: ${POOLER_MAX_CLIENT_CONN}
+      POOLER_POOL_MODE: transaction
+      DB_POOL_SIZE: ${POOLER_DB_POOL_SIZE}
+    command:
+      [
+        "/bin/sh",
+        "-c",
+        "/app/bin/migrate && /app/bin/supavisor eval \"$$(cat /etc/pooler/pooler.exs)\" && /app/bin/server"
+      ]
 
 volumes:
   db-config:
