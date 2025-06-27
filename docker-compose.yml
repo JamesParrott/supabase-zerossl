@@ -71,6 +71,7 @@ services:
       analytics:
         condition: service_healthy
       kongredis:
+        condition: service_started
     environment:
       KONG_DECLARATIVE_CONFIG: /home/kong/kong.yml
       # https://github.com/supabase/cli/issues/14
